@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, emit
 import time
-from datetime import datetime
+from datetime import datetime   
 import random
 from threading import Thread 
 import threading
@@ -11,6 +11,7 @@ import requests
 
 url = 'http://192.168.10.11'
 app = Flask(__name__)
+socketio = SocketIO(app)
 Lista_puertos = []
 lider = None
 puerto = None
@@ -20,19 +21,7 @@ tread = False
 
 @app.route('/')
 def index():
-    global lider  # Usar la variable global lider dentro de la función
-    if not Lista_puertos:
-        lider = -1
-        print(f'el lider es {lider}' )
-        return  "Soy el lider"
-    else:
-        act_lider = None 
-        if lider == -1:
-            act_lider = 'soy el lider'
-        else:
-            act_lider = lider
-        return f'EL lider es {act_lider} mi peso es {peso} y y el tamaño es {len(Lista_puertos)}'
-    return '¡La aplicación Flask está en funcionamiento!',estado
+    return render_template('index.html')
 
 
 @app.route('/agregar_numero', methods=['POST'])
@@ -43,13 +32,17 @@ def agregar_numero():
         try:
             numero = int(numero)
             if numero in Lista_puertos:
+                sendlog("Error: El puerto ya existe en la lista ", "")
                 return jsonify({"mensaje": "Error: El número ya existe en la lista."}), 400
             else:
                 Lista_puertos.append(numero)
+                sendlog(f'Puerto {numero} agregado correctamente ','')
                 return jsonify({"mensaje": "Número agregado correctamente a la lista.", "lista": Lista_puertos}), 200
         except ValueError:
+            sendlog("Error: El valor enviado no es un numero entero","")
             return jsonify({"mensaje": "Error: El valor enviado no es un número entero."}), 400
     else:
+        sendlog("Error: No se ha proporcionado ningun valor en la solicitud","")
         return jsonify({"mensaje": "Error: No se proporcionó ningún número en la solicitud."}), 400
 
 @app.route('/healthcheck', methods=['GET'])
@@ -62,11 +55,14 @@ def health_check():
 
 def start_health_check(interval):
     global lider, scheduler
+    
     print(f'aqui estoy lider es {lider}')
     if lider == -1:
+        sendlog("No hay puertos en mi lista soy el lider","")
         print('soy el lider')
     else:
         print('aqui estoy preocupate')
+        sendlog(f"Se va a empezar a realizar helatCheck al lider {lider} cada {interval} segundos","")
         scheduler = sched.scheduler(time.time, time.sleep)  # Define el planificador
         print(interval)
         periodic_task(interval)
@@ -83,6 +79,7 @@ def check_app_health():
     except requests.exceptions.RequestException as e:
         print("Error al verificar el estado de la aplicación:")
         print("El servidor está indisponible. La aplicación continúa su curso normal.")
+        sendlog(f"el lider {lider} no esta disponible se busca nuevo lider")
         get_lider()
 
 # Define la función que programa la verificación periódica
@@ -113,6 +110,7 @@ def get_weight():
         respuesta = "Mayor"
     elif peso_actual < peso_solicitado:
         respuesta = "Menor"
+        sendlog("El peso del Nodo verifiacdor es menor inicio a buscar un lider mayor")
         threading.Thread(target=get_lider).start()
     else:
         respuesta = "Igual"
@@ -140,17 +138,21 @@ def get_lider():
             print("Respuesta del otro nodo:", respuesta)
         except requests.exceptions.RequestException as e:
             # Maneja cualquier error de solicitud, incluido el tiempo de espera agotado
+            sendlog(f"EL Nodo {Lista_puertos[llamadas]} no esta disponible","")
             print("Error al solicitar información del otro nodo:",e)
         llamadas+=1
         if respuesta == "Mayor":
             print("Ejecutar")
             llamadas = len(Lista_puertos)+3 
+            sendlog(f"El nodo {Lista_puertos[llamadas]} tiene un peso {respuesta} que es mayor a {peso}","")
         elif respuesta == "Menor" or respuesta == "Igual":
+            sendlog(f"El nodo {Lista_puertos[llamadas]} tiene un peso {respuesta} que es menor a {peso}","")
             # Continuar ejecutándose normalmente
             pass
     if llamadas == len(Lista_puertos):
         lider = -1
         tread = False
+        sendlog(f"No hay un nodo con un peso mayor a {peso} ahora soy el lider")
         enviar_nuevo_lider()
         print('Ahora soy el lider')
 
@@ -164,8 +166,10 @@ def nuevo_lider():
     if nuevo_lider is not None:
         lider = nuevo_lider
         print(f"El nuevo líder es: {lider}")
+        sendlog(f"El  nuevo lider es {nuevo_lider} y se ha guardado correctamente","")
         return jsonify({"mensaje": "Nuevo líder establecido correctamente."}), 200
     else:
+        sendlog(f"Error: No se ha detectado un nuevo lider dentro de la solicitud","")
         return jsonify({"mensaje": "Error: No se proporcionó ningún nuevo líder en la solicitud."}), 400
     
 
@@ -180,10 +184,41 @@ def enviar_nuevo_lider():
             response = requests.post(url_nuevo_lider, json={"nuevo_lider": mi_puerto})
             # Verifica si la solicitud fue exitosa
             response.raise_for_status()
+            sendlog(f"El  nuevo lider fue enviado al puerto {puerto}","")
             print(f"Nuevo líder enviado al nodo {puerto}")
         except requests.exceptions.RequestException as e:
             # Maneja cualquier error de solicitud
+            sendlog(f"Error al enviar el lider al puerto {puerto}, el puerto en cuestion no responde","")
             print(f"Error al enviar nuevo líder al nodo {puerto}")
+
+@socketio.on('connect')
+def test_connect():
+    print('Client connected')
+
+@socketio.on('start_stream')
+def handle_start_stream():
+    print('Client connected and started streaming')
+
+@socketio.on('obtener_datos')
+def handle_obtener_datos():
+    global Lista_puertos, lider, mi_puerto, peso
+    act_lider = None 
+    if lider == -1:
+       act_lider = mi_puerto
+    else:
+        act_lider = lider
+    # Enviamos los datos al cliente
+    datos = {
+        'lista_puertos': Lista_puertos,
+        'puerto_lider': act_lider,
+        'mi_puerto': mi_puerto,
+        'mi_id': peso
+    }
+    socketio.emit('datos_obtenidos', datos)
+
+def sendlog(msg, ip):
+    thetime = datetime.now()
+    socketio.emit('log', '['+ thetime.strftime('%m/%d/%y %H:%M:%S') + '] ' + msg + ' ip: ' + str(ip))
 
 
 def validar_argumentos():
@@ -209,6 +244,7 @@ def validar_argumentos():
             peso = peso_mi_puerto
             if len(Lista_puertos) == 0:
                 lider = -1
+                sendlog("No hay otros puertos soy el lider", mi_puerto)
         except ValueError:
             print("Error: Por favor, asegúrate de ingresar solo números para los puertos y pesos.")
             sys.exit(1)
