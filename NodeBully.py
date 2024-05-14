@@ -9,7 +9,7 @@ import sched
 import requests
 
 
-url = 'http://192.168.10.11'
+url = 'http://10.4.75.114'
 app = Flask(__name__)
 socketio = SocketIO(app)
 Lista_puertos = []
@@ -37,6 +37,8 @@ def agregar_numero():
             else:
                 Lista_puertos.append(numero)
                 sendlog(f'Puerto {numero} agregado correctamente ','')
+                print(Lista_puertos)
+                
                 return jsonify({"mensaje": "Número agregado correctamente a la lista.", "lista": Lista_puertos}), 200
         except ValueError:
             sendlog("Error: El valor enviado no es un numero entero","")
@@ -79,7 +81,7 @@ def check_app_health():
     except requests.exceptions.RequestException as e:
         print("Error al verificar el estado de la aplicación:")
         print("El servidor está indisponible. La aplicación continúa su curso normal.")
-        sendlog(f"el lider {lider} no esta disponible se busca nuevo lider")
+        sendlog(f"el lider {lider} no esta disponible se busca nuevo lider","")
         get_lider()
 
 # Define la función que programa la verificación periódica
@@ -108,10 +110,10 @@ def get_weight():
     
     if peso_actual > peso_solicitado:
         respuesta = "Mayor"
+        sendlog("El peso del Nodo verifiacdor es menor inicio a buscar un lider mayor","")
+        threading.Thread(target=get_lider).start()
     elif peso_actual < peso_solicitado:
         respuesta = "Menor"
-        sendlog("El peso del Nodo verifiacdor es menor inicio a buscar un lider mayor")
-        threading.Thread(target=get_lider).start()
     else:
         respuesta = "Igual"
     
@@ -139,22 +141,23 @@ def get_lider():
         except requests.exceptions.RequestException as e:
             # Maneja cualquier error de solicitud, incluido el tiempo de espera agotado
             sendlog(f"EL Nodo {Lista_puertos[llamadas]} no esta disponible","")
-            print("Error al solicitar información del otro nodo:",e)
-        llamadas+=1
+            print("Error al solicitar información del otro nodo:",e) 
         if respuesta == "Mayor":
             print("Ejecutar")
-            llamadas = len(Lista_puertos)+3 
             sendlog(f"El nodo {Lista_puertos[llamadas]} tiene un peso {respuesta} que es mayor a {peso}","")
         elif respuesta == "Menor" or respuesta == "Igual":
             sendlog(f"El nodo {Lista_puertos[llamadas]} tiene un peso {respuesta} que es menor a {peso}","")
             # Continuar ejecutándose normalmente
             pass
+        llamadas+=1
     if llamadas == len(Lista_puertos):
         lider = -1
         tread = False
-        sendlog(f"No hay un nodo con un peso mayor a {peso} ahora soy el lider")
+        sendlog(f"No hay un nodo con un peso mayor a {peso} ahora soy el lider", "")
+
         enviar_nuevo_lider()
         print('Ahora soy el lider')
+    
 
 get_lider_running = False
 
@@ -166,6 +169,7 @@ def nuevo_lider():
     if nuevo_lider is not None:
         lider = nuevo_lider
         print(f"El nuevo líder es: {lider}")
+        obtener_lider(lider)
         sendlog(f"El  nuevo lider es {nuevo_lider} y se ha guardado correctamente","")
         return jsonify({"mensaje": "Nuevo líder establecido correctamente."}), 200
     else:
@@ -175,7 +179,7 @@ def nuevo_lider():
 
 def enviar_nuevo_lider():
     global Lista_puertos, url, mi_puerto
-    
+    obtener_lider(mi_puerto)
     for puerto in Lista_puertos:
         try:
             # Construye la URL para enviar el nuevo líder al nodo actual
@@ -199,26 +203,35 @@ def test_connect():
 def handle_start_stream():
     print('Client connected and started streaming')
 
-@socketio.on('obtener_datos')
-def handle_obtener_datos():
-    global Lista_puertos, lider, mi_puerto, peso
-    act_lider = None 
+def enviar_datos_al_cliente(msg):
+    global mi_puerto, lider, peso, Lista_puertos
+    mensaje = msg
+    # Envía los datos al cliente a través del WebSocket
     if lider == -1:
-       act_lider = mi_puerto
-    else:
-        act_lider = lider
-    # Enviamos los datos al cliente
-    datos = {
-        'lista_puertos': Lista_puertos,
-        'puerto_lider': act_lider,
+        emit('obtener_datos', {
+        'puerto_lider': mi_puerto,
         'mi_puerto': mi_puerto,
         'mi_id': peso
-    }
-    socketio.emit('datos_obtenidos', datos)
+        })
+    else:
+        emit('obtener_datos', {
+        'puerto_lider': lider,
+        'mi_puerto': mi_puerto,
+        'mi_id': peso
+        })
+
+@socketio.on('connect')
+def handle_connect():
+    # Envía los datos al cliente al conectarse por primera vez
+    enviar_datos_al_cliente("")
+    
+
+def obtener_lider(port):
+    socketio.emit('obtener_lider', 'El lider es '+str(port)+'')
 
 def sendlog(msg, ip):
     thetime = datetime.now()
-    socketio.emit('log', '['+ thetime.strftime('%m/%d/%y %H:%M:%S') + '] ' + msg + ' ip: ' + str(ip))
+    socketio.emit('log', '['+ thetime.strftime('%m/%d/%y %H:%M:%S') + '] ' + msg + '' + str(ip))
 
 
 def validar_argumentos():
@@ -256,5 +269,5 @@ def validar_argumentos():
 if __name__ == '__main__':
     validar_argumentos()
     # Llama a esta función para iniciar la ejecución periódica del health check
-    start_health_check(random.randint(10, 100)) 
+    start_health_check(random.randint(10, 100))  
     app.run(debug=True, host='0.0.0.0')
