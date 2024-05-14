@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Hello World</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</head>
+<body>
+    <div class="column-container">
+        <div class="column-up">
+            <p id="hora" class="hora">16:20:00</p>
+            <p id="cliente" class="wide-letters">CLIENTE</p>
+
+
+        </div>
+        <div class="datosContainer">
+            <!-- Aquí se mostrarán los datos recibidos del servidor -->
+        </div>
+        <div class="column-down">
+            <div class="log-console">
+            </div>
+        </div>
+    </div>
+</body>
+</html>
